@@ -1,10 +1,7 @@
-import sys
 import gym
-import pylab
-import random
 import numpy as np
-from collections import deque
-from gym import wrappers
+import pylab
+
 from dqn import DQNAgent
 
 EPISODES = 300
@@ -12,7 +9,7 @@ EPISODES = 300
 
 if __name__ == "__main__":
     # In case of CartPole-v1, maximum length of episode is 500
-    env = gym.make('CartPole-v1')
+    env = gym.make("CartPole-v1")
     # get size of state and action from environment
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
@@ -53,16 +50,24 @@ if __name__ == "__main__":
                 score = score if score == 500 else score + 100
                 scores.append(score)
                 episodes.append(e)
-                pylab.plot(episodes, scores, 'b')
-                pylab.savefig("./save_graph/cartpole_dqn.png")
-                print("episode:", e, "  score:", score, "  memory length:",
-                      len(agent.memory), "  epsilon:", agent.epsilon)
+                pylab.plot(episodes, scores, "b")
+                pylab.savefig("./graph/cartpole_dqn.png")
+                print(
+                    "episode:",
+                    e,
+                    " score:",
+                    score,
+                    " memory length:",
+                    len(agent.memory),
+                    " epsilon:",
+                    agent.epsilon,
+                )
 
                 # if the mean of scores of last 10 episode is bigger than 490
                 # stop training
-                if np.mean(scores[-min(10, len(scores)):]) > 490:
-                    sys.exit()
+                if np.mean(scores[-min(10, len(scores)) :]) > 490:
+                    break
 
         # save the model
         if e % 50 == 0:
-            agent.model.save_weights("./save_model/cartpole_dqn.h5")
+            agent.model.save_weights("./model/cartpole_dqn.h5")

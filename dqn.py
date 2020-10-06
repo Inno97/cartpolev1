@@ -1,25 +1,20 @@
-import sys
-import gym
-import pylab
 import random
-import numpy as np
 from collections import deque
-from gym import wrappers
-from keras.layers import Dense
-from keras.optimizers import Adam
-from keras.models import Sequential
 
-EPISODES = 300
+import numpy as np
+from keras.layers import Dense
+from keras.models import Sequential
+from keras.optimizers import Adam
 
 
 # DQN Agent for the Cartpole
 # it uses Neural Network to approximate q function
 # and replay memory & target q network
 class DQNAgent:
-    def __init__(self, state_size, action_size):
+    def __init__(self, state_size, action_size, render=False, load_model=False):
         # if you want to see Cartpole learning, then change to True
-        self.render = True
-        self.load_model = True
+        self.render = render
+        self.load_model = load_model
 
         # get size of state and action
         self.state_size = state_size
@@ -50,14 +45,22 @@ class DQNAgent:
     # state is input and Q Value of each action is output of network
     def build_model(self):
         model = Sequential()
-        model.add(Dense(24, input_dim=self.state_size, activation='relu',
-                        kernel_initializer='he_uniform'))
-        model.add(Dense(24, activation='relu',
-                        kernel_initializer='he_uniform'))
-        model.add(Dense(self.action_size, activation='linear',
-                        kernel_initializer='he_uniform'))
+        model.add(
+            Dense(
+                24,
+                input_dim=self.state_size,
+                activation="relu",
+                kernel_initializer="he_uniform",
+            )
+        )
+        model.add(Dense(24, activation="relu", kernel_initializer="he_uniform"))
+        model.add(
+            Dense(
+                self.action_size, activation="linear", kernel_initializer="he_uniform"
+            )
+        )
         model.summary()
-        model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
+        model.compile(loss="mse", optimizer=Adam(lr=self.learning_rate))
         return model
 
     # after some time interval update the target model to be same with model
@@ -66,6 +69,10 @@ class DQNAgent:
 
     # get action from model using epsilon-greedy policy
     def get_action(self, state):
+        if self.load_model:
+            q_value = self.model.predict(state)
+            return np.argmax(q_value[0])
+
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
         else:
@@ -105,9 +112,10 @@ class DQNAgent:
                 target[i][action[i]] = reward[i]
             else:
                 target[i][action[i]] = reward[i] + self.discount_factor * (
-                    np.amax(target_val[i]))
+                    np.amax(target_val[i])
+                )
 
         # and do the model fit!
-        self.model.fit(update_input, target, batch_size=self.batch_size,
-                       epochs=1, verbose=0)
-
+        self.model.fit(
+            update_input, target, batch_size=self.batch_size, epochs=1, verbose=0
+        )
