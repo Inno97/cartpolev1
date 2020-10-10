@@ -7,20 +7,19 @@ from keras.models import Sequential
 from keras.optimizers import Adam
 
 
-# DQN Agent for the Cartpole
+# Double DQN Agent for the Cartpole
 # it uses Neural Network to approximate q function
 # and replay memory & target q network
-class DQNAgent:
+class DoubleDQNAgent:
     def __init__(self, state_size, action_size, render=False, load_model=False):
         # if you want to see Cartpole learning, then change to True
         self.render = render
         self.load_model = load_model
-
         # get size of state and action
         self.state_size = state_size
         self.action_size = action_size
 
-        # These are hyper parameters for the DQN
+        # these is hyper parameters for the Double DQN
         self.discount_factor = 0.99
         self.learning_rate = 0.001
         self.epsilon = 1.0
@@ -96,7 +95,7 @@ class DQNAgent:
         update_target = np.zeros((batch_size, self.state_size))
         action, reward, done = [], [], []
 
-        for i in range(self.batch_size):
+        for i in range(batch_size):
             update_input[i] = mini_batch[i][0]
             action.append(mini_batch[i][1])
             reward.append(mini_batch[i][2])
@@ -104,17 +103,24 @@ class DQNAgent:
             done.append(mini_batch[i][4])
 
         target = self.model.predict(update_input)
+        target_next = self.model.predict(update_target)
         target_val = self.target_model.predict(update_target)
 
         for i in range(self.batch_size):
-            # Q Learning: get maximum Q value at s' from target model
+            # like Q Learning, get maximum Q value at s'
+            # But from target model
             if done[i]:
                 target[i][action[i]] = reward[i]
             else:
+                # the key point of Double DQN
+                # selection of action is from model
+                # update is from target model
+                a = np.argmax(target_next[i])
                 target[i][action[i]] = reward[i] + self.discount_factor * (
-                    np.amax(target_val[i])
+                    target_val[i][a]
                 )
 
+        # make minibatch which includes target q value and predicted q value
         # and do the model fit!
         self.model.fit(
             update_input, target, batch_size=self.batch_size, epochs=1, verbose=0

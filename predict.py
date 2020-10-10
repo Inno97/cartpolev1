@@ -1,9 +1,24 @@
+import argparse
+
 import gym
 import numpy as np
 
+from ddqn import DoubleDQNAgent
 from dqn import DQNAgent
 
+
+class Model:
+    DDQN = "DDQN"
+    DQN = "DQN"
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", help="select model DQN or DDQN")
+    args = parser.parse_args()
+
+    model = args.model
+
     env = gym.make("CartPole-v1")
 
     # get size of state and action from environment
@@ -12,7 +27,14 @@ if __name__ == "__main__":
     load_model = True
     render = True
 
-    agent = DQNAgent(state_size, action_size, render=render, load_model=load_model)
+    if model == Model.DQN:
+        agent = DQNAgent(state_size, action_size, render=render, load_model=load_model)
+    elif model == Model.DDQN:
+        agent = DoubleDQNAgent(
+            state_size, action_size, render=render, load_model=load_model
+        )
+    else:
+        raise Exception("Model does not exist")
 
     done = False
     score = 0

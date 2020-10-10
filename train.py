@@ -1,20 +1,39 @@
+import argparse
+
 import gym
 import numpy as np
 import pylab
 
+from ddqn import DoubleDQNAgent
 from dqn import DQNAgent
 
 EPISODES = 300
 
 
+class Model:
+    DDQN = "DDQN"
+    DQN = "DQN"
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", help="select model DQN or DDQN")
+    args = parser.parse_args()
+
+    model = args.model
+
     # In case of CartPole-v1, maximum length of episode is 500
     env = gym.make("CartPole-v1")
     # get size of state and action from environment
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
 
-    agent = DQNAgent(state_size, action_size)
+    if model == Model.DQN:
+        agent = DQNAgent(state_size, action_size)
+    elif model == Model.DDQN:
+        agent = DoubleDQNAgent(state_size, action_size)
+    else:
+        raise Exception("Model does not exist")
 
     scores, episodes = [], []
 
@@ -51,7 +70,7 @@ if __name__ == "__main__":
                 scores.append(score)
                 episodes.append(e)
                 pylab.plot(episodes, scores, "b")
-                pylab.savefig("./graph/cartpole_dqn.png")
+                pylab.savefig("./graph/cartpolev1.png")
                 print(
                     "episode:",
                     e,
@@ -70,4 +89,4 @@ if __name__ == "__main__":
 
         # save the model
         if e % 50 == 0:
-            agent.model.save_weights("./model/cartpole_dqn.h5")
+            agent.model.save_weights("./model/cartpolev1.h5")
