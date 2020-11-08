@@ -4,16 +4,17 @@ from collections import deque
 import gym
 import numpy as np
 import pylab
-from keras.layers import Dense
+from keras.layers import LSTM, Dense
 from keras.models import Sequential
 from keras.optimizers import Adam
 
-EPISODES = 300
+EPISODES = 500
 
-# DQN Agent for the Cartpole
+
+# DRQN Agent for the Cartpole
 # it uses Neural Network to approximate q function
 # and replay memory & target q network
-class DQNAgent:
+class DRQNAgent:
     def __init__(self, state_size, action_size, render=False, load_model=False):
         # if you want to see Cartpole learning, then change to True
         self.render = render
@@ -23,7 +24,7 @@ class DQNAgent:
         self.state_size = state_size
         self.action_size = action_size
 
-        # These are hyper parameters for the DQN
+        # These are hyper parameters for the DRQN
         self.discount_factor = 0.99
         self.learning_rate = 0.001
         self.epsilon = 1.0
@@ -42,27 +43,14 @@ class DQNAgent:
         self.update_target_model()
 
         if self.load_model:
-            self.model.load_weights("./save_model/cartpole_dqn.h5")
+            self.model.load_weights("./save_model/cartpole_drqn.h5")
 
     # approximate Q function using Neural Network
     # state is input and Q Value of each action is output of network
     def build_model(self):
         model = Sequential()
-        model.add(
-            Dense(
-                24,
-                input_dim=self.state_size,
-                activation="relu",
-                kernel_initializer="he_uniform",
-            )
-        )
-        model.add(Dense(24, activation="relu", kernel_initializer="he_uniform"))
-        model.add(
-            Dense(
-                self.action_size, activation="linear", kernel_initializer="he_uniform"
-            )
-        )
-        model.summary()
+        model.add(LSTM(32, input_shape=(self.state_size, 2)))
+        model.add(Dense(self.action_size))
         model.compile(loss="mse", optimizer=Adam(lr=self.learning_rate))
         return model
 
@@ -95,8 +83,8 @@ class DQNAgent:
         batch_size = min(self.batch_size, len(self.memory))
         mini_batch = random.sample(self.memory, batch_size)
 
-        update_input = np.zeros((batch_size, self.state_size))
-        update_target = np.zeros((batch_size, self.state_size))
+        update_input = np.zeros((batch_size, self.state_size, 2))
+        update_target = np.zeros((batch_size, self.state_size, 2))
         action, reward, done = [], [], []
 
         for i in range(self.batch_size):
@@ -127,11 +115,16 @@ class DQNAgent:
 def train():
     # In case of CartPole-v1, maximum length of episode is 500
     env = gym.make("CartPole-v1")
+
+    # Number of past state to use
+    number_of_past_state = 4
+
     # get size of state and action from environment
     state_size = env.observation_space.shape[0]
+    expanded_state_size = state_size * number_of_past_state
     action_size = env.action_space.n
 
-    agent = DQNAgent(state_size, action_size)
+    agent = DRQNAgent(expanded_state_size, action_size)
 
     scores, episodes = [], []
 
@@ -139,25 +132,52 @@ def train():
         done = False
         score = 0
         state = env.reset()
-        state = np.reshape(state, [1, state_size])
+
+        # expand the state with past states and initialize
+        expanded_state = np.zeros(expanded_state_size)
+        expanded_next_state = np.zeros(expanded_state_size)
+        for h in range(state_size):
+            expanded_state[(h + 1) * number_of_past_state - 1] = state[h]
+
+        # reshape states for LSTM input without embedding layer
+        reshaped_state = np.zeros((1, expanded_state_size, 2))
+        for i in range(expanded_state_size):
+            for j in range(2):
+                reshaped_state[0, i, j] = expanded_state[i]
 
         while not done:
             if agent.render:
                 env.render()
 
             # get action for the current state and go one step in environment
-            action = agent.get_action(state)
+            action = agent.get_action(reshaped_state)
             next_state, reward, done, info = env.step(action)
-            next_state = np.reshape(next_state, [1, state_size])
+
+            # update the expanded next state with next state values
+            for h in range(state_size):
+                expanded_next_state[(h + 1) * number_of_past_state - 1] = next_state[h]
+
+            # reshape expanded next state for LSTM input without embedding layer
+            reshaped_next_state = np.zeros((1, expanded_state_size, 2))
+            for i in range(expanded_state_size):
+                for j in range(2):
+                    reshaped_next_state[0, i, j] = expanded_next_state[i]
+
             # if an action make the episode end, then gives penalty of -100
             reward = reward if not done or score == 499 else -100
 
             # save the sample <s, a, r, s'> to the replay memory
-            agent.append_sample(state, action, reward, next_state, done)
+            agent.append_sample(
+                reshaped_state, action, reward, reshaped_next_state, done
+            )
+
             # every time step do the training
             agent.train_model()
             score += reward
-            state = next_state
+            reshaped_state = reshaped_next_state
+
+            # Shifting past state elements to the left by one
+            expanded_next_state = np.roll(expanded_next_state, -1)
 
             if done:
                 # every episode update the target model to be same with model
@@ -168,55 +188,91 @@ def train():
                 scores.append(score)
                 episodes.append(e)
                 pylab.plot(episodes, scores, "b")
-                pylab.savefig("./save_graph/cartpole_dqn.png")
+                pylab.savefig("./save_graph/cartpole_drqn.png")
                 print(
                     "episode:",
                     e,
-                    " score:",
+                    "  score:",
                     score,
-                    " memory length:",
+                    "  memory length:",
                     len(agent.memory),
-                    " epsilon:",
+                    "  epsilon:",
                     agent.epsilon,
                 )
 
-                # if the mean of scores of last 10 episode is bigger than 490
-                # stop training
-                if np.mean(scores[-min(10, len(scores)) :]) > 490:
-                    break
+            # if the mean of scores of last 10 episode is bigger than 490
+            # stop training
+            # revised to exit cleanly on Jupiter notebook
+            if np.mean(scores[-min(10, len(scores)) :]) > 490:
+                # sys.exit()
+                env.close()
+                break
 
         # save the model
         if e % 50 == 0:
-            agent.model.save_weights("./save_model/cartpole_dqn.h5")
+            agent.model.save_weights("./save_model/cartpole_drqn.h5")
 
 
 def predict():
+    # In case of CartPole-v1, maximum length of episode is 500
     env = gym.make("CartPole-v1")
+
+    # Number of past state to use
+    number_of_past_state = 4
 
     # get size of state and action from environment
     state_size = env.observation_space.shape[0]
+    expanded_state_size = state_size * number_of_past_state
     action_size = env.action_space.n
+
     load_model = True
     render = True
 
-    agent = DQNAgent(state_size, action_size, render=render, load_model=load_model)
+    agent = DRQNAgent(
+        expanded_state_size, action_size, render=render, load_model=load_model
+    )
 
     done = False
     score = 0
     state = env.reset()
-    state = np.reshape(state, [1, state_size])
+
+    # expand the state with past states and initialize
+    expanded_state = np.zeros(expanded_state_size)
+    expanded_next_state = np.zeros(expanded_state_size)
+    for h in range(state_size):
+        expanded_state[(h + 1) * number_of_past_state - 1] = state[h]
+
+    # reshape states for LSTM input without embedding layer
+    reshaped_state = np.zeros((1, expanded_state_size, 2))
+    for i in range(expanded_state_size):
+        for j in range(2):
+            reshaped_state[0, i, j] = expanded_state[i]
 
     while not done:
         if agent.render:
             env.render()
 
         # get action for the current state and go one step in environment
-        action = agent.get_action(state)
+        action = agent.get_action(reshaped_state)
         next_state, reward, done, info = env.step(action)
-        next_state = np.reshape(next_state, [1, state_size])
+
+        # update the expanded next state with next state values
+        for h in range(state_size):
+            expanded_next_state[(h + 1) * number_of_past_state - 1] = next_state[h]
+
+        # reshape expanded next state for LSTM input without embedding layer
+        reshaped_next_state = np.zeros((1, expanded_state_size, 2))
+        for i in range(expanded_state_size):
+            for j in range(2):
+                reshaped_next_state[0, i, j] = expanded_next_state[i]
+
+        # if an action make the episode end, then gives penalty of -100
+        reward = reward if not done or score == 499 else -100
 
         score += reward
-        state = next_state
+        reshaped_state = reshaped_next_state
+
+        expanded_next_state = np.roll(expanded_next_state, -1)
 
         if done:
             print(score)

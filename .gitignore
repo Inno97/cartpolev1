@@ -3,3 +3,5 @@ env/
 __pycache__/
 graph/
 .ipynb_checkpoints/
+*.png
+*.h5
