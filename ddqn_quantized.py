@@ -8,16 +8,25 @@ from keras.layers import Dense
 from keras.models import Sequential
 from keras.optimizers import Adam
 
-EPISODES = 300
+import tensorflow_model_optimization as tfmot
+import tensorflow as tf
+import os
+
+EPISODES = 300 #300
 
 # Double DQN Agent for the Cartpole
 # it uses Neural Network to approximate q function
 # and replay memory & target q network
+
+# quantization is done through quantized aware training, then finally the quantized model is created afterwards
+# see https://www.tensorflow.org/model_optimization/guide/quantization/training_example
 class DoubleDQNAgent:
-    def __init__(self, state_size, action_size, render=False, load_model=False):
+    def __init__(self, state_size, action_size, render=False, load_model=False, mode="null"):
         # if you want to see Cartpole learning, then change to True
         self.render = render
         self.load_model = load_model
+        self.mode = mode
+
         # get size of state and action
         self.state_size = state_size
         self.action_size = action_size
@@ -34,14 +43,19 @@ class DoubleDQNAgent:
         self.memory = deque(maxlen=2000)
 
         # create main model and target model
+        print("setting DDQN for quantized aware training")
         self.model = self.build_model()
         self.target_model = self.build_model()
+        self.set_quant_model()
 
         # initialize target model
         self.update_target_model()
 
-        if self.load_model:
-            self.model.load_weights("./save_model/cartpole_ddqn.h5")
+        if self.load_model and mode == "eval":
+            # load up TFLite model
+            self.interpreter = tf.lite.Interpreter(model_path="ddqn_quant.tflite")
+            self.interpreter.allocate_tensors()
+            #self.model.load_weights("./save_model/cartpole_ddqn.h5")
 
     # approximate Q function using Neural Network
     # state is input and Q Value of each action is output of network
@@ -71,15 +85,32 @@ class DoubleDQNAgent:
 
     # get action from model using epsilon-greedy policy
     def get_action(self, state):
-        if self.load_model:
-            q_value = self.model.predict(state)
-            return np.argmax(q_value[0])
+        if self.mode == "train":
+            if self.load_model:
+                q_value = self.model.predict(state)
+                return np.argmax(q_value[0])
 
-        if np.random.rand() <= self.epsilon:
-            return random.randrange(self.action_size)
-        else:
-            q_value = self.model.predict(state)
-            return np.argmax(q_value[0])
+            if np.random.rand() <= self.epsilon:
+                return random.randrange(self.action_size)
+            else:
+                q_value = self.model.predict(state)
+                return np.argmax(q_value[0])
+        elif self.mode == "eval":
+            input_details = self.interpreter.get_input_details()
+            output_details = self.interpreter.get_output_details()
+            #print("input details", input_details)
+            #print("output details", input_details)
+
+            #print("state", state)
+            input_shape = input_details[0]['shape']
+            input_data = np.array(state, dtype=np.float32)
+            self.interpreter.set_tensor(input_details[0]['index'], input_data)
+
+            self.interpreter.invoke()
+
+            output_data = self.interpreter.get_tensor(output_details[0]['index'])
+            #print(output_data)
+            return np.argmax(output_data[0])
 
     # save sample <s,a,r,s'> to the replay memory
     def append_sample(self, state, action, reward, next_state, done):
@@ -129,7 +160,126 @@ class DoubleDQNAgent:
             update_input, target, batch_size=self.batch_size, epochs=1, verbose=0
         )
 
+    # set both model and target_model for quantized aware training
+    def set_quant_model(self):
+        quantize_model = tfmot.quantization.keras.quantize_model
 
+        # q_aware stands for for quantization aware.
+        q_aware_model = quantize_model(self.model)
+
+        # `quantize_model` requires a recompile.
+        q_aware_model.compile(loss="mse", optimizer=Adam(lr=self.learning_rate))
+
+        q_aware_model.summary()
+
+        self.model = q_aware_model
+
+        # q_aware stands for for quantization aware.
+        q_aware_target_model = quantize_model(self.target_model)
+
+        # `quantize_model` requires a recompile.
+        q_aware_target_model.compile(loss="mse", optimizer=Adam(lr=self.learning_rate))
+
+        q_aware_target_model.summary()
+
+        self.target_model = q_aware_target_model
+
+    # save quant aware training model, if enabled
+    def save_quant_model(self, verbose = False):
+        # create quantized model for TFLite
+        converter = tf.lite.TFLiteConverter.from_keras_model(self.model)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        self.quantized_tflite_model = converter.convert()
+
+        with open('ddqn_quant.tflite', 'wb') as f:
+            f.write(self.quantized_tflite_model)
+
+        # create regular TFLite model for reference
+        converter = tf.lite.TFLiteConverter.from_keras_model(self.model)
+        tflite_model = converter.convert()
+
+        with open('ddqn_regular.tflite', 'wb') as f:
+            f.write(tflite_model)
+
+        if verbose:
+            model_size_mb = os.path.getsize("ddqn_regular.tflite") / float(2**20)
+            quant_model_size_mb = os.path.getsize("ddqn_quant.tflite") / float(2**20)
+
+            print("For reference, quantized model takes {:3f}% ".format((quant_model_size_mb / model_size_mb)))
+            print("Float model in Mb:", os.path.getsize("ddqn_regular.tflite") / float(2**20))
+            print("Quantized model in Mb:", os.path.getsize("ddqn_quant.tflite") / float(2**20))
+
+# quantized aware training DDQN
+# note that this does not produce a quantized model, it must be done separately after this
+def q_aware_train():
+    print("doing quantized aware training")
+    # In case of CartPole-v1, maximum length of episode is 500
+    env = gym.make("CartPole-v1")
+    # get size of state and action from environment
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.n
+
+    print("setting up agent")
+    agent = DoubleDQNAgent(state_size, action_size, mode="train")
+
+    scores, episodes = [], []
+
+    for e in range(EPISODES):
+        done = False
+        score = 0
+        state = env.reset()
+        state = np.reshape(state, [1, state_size])
+
+        while not done:
+            if agent.render:
+                env.render()
+
+            # get action for the current state and go one step in environment
+            action = agent.get_action(state)
+            next_state, reward, done, info = env.step(action)
+            next_state = np.reshape(next_state, [1, state_size])
+            # if an action make the episode end, then gives penalty of -100
+            reward = reward if not done or score == 499 else -100
+
+            # save the sample <s, a, r, s'> to the replay memory
+            agent.append_sample(state, action, reward, next_state, done)
+            # every time step do the training
+            agent.train_model()
+            score += reward
+            state = next_state
+
+            if done:
+                # every episode update the target model to be same with model
+                agent.update_target_model()
+
+                # every episode, plot the play time
+                score = score if score == 500 else score + 100
+                scores.append(score)
+                episodes.append(e)
+                pylab.plot(episodes, scores, "b")
+                pylab.savefig("./save_graph/cartpole_ddqn_quant.png")
+                print(
+                    "episode:",
+                    e,
+                    " score:",
+                    score,
+                    " memory length:",
+                    len(agent.memory),
+                    " epsilon:",
+                    agent.epsilon,
+                )
+
+                # if the mean of scores of last 10 episode is bigger than 490
+                # stop training
+                if np.mean(scores[-min(10, len(scores)) :]) > 490:
+                    break
+
+        # save the model
+        if e % 50 == 0:
+            agent.save_quant_model()
+            #agent.model.save_weights("./save_model/cartpole_ddqn_quant.h5")
+
+# regular DDQN training
 def train():
     # In case of CartPole-v1, maximum length of episode is 500
     env = gym.make("CartPole-v1")
@@ -195,6 +345,7 @@ def train():
         if e % 50 == 0:
             agent.model.save_weights("./save_model/cartpole_ddqn.h5")
 
+    save_quant_model(verbose=True)
 
 def predict():
     env = gym.make("CartPole-v1")
@@ -206,7 +357,7 @@ def predict():
     render = True
 
     agent = DoubleDQNAgent(
-        state_size, action_size, render=render, load_model=load_model
+        state_size, action_size, render=render, load_model=load_model, mode="eval"
     )
 
     done = False
@@ -229,7 +380,8 @@ def predict():
         if done:
             print(score)
 
-
 if __name__ == "__main__":
-    train()
+    q_aware_train()
+
+    #train()
     predict()
