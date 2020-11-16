@@ -382,6 +382,4 @@ def predict():
 
 if __name__ == "__main__":
     q_aware_train()
-
-    #train()
     predict()
