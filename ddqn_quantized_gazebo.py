@@ -12,6 +12,9 @@ import tensorflow_model_optimization as tfmot
 import tensorflow as tf
 import os
 
+# TODO import robot_environment.py
+import robot_environment 
+
 import time
 
 EPISODES = 300 #300
@@ -223,11 +226,20 @@ class DoubleDQNAgent_quant:
 # note that this does not produce a quantized model, it must be done separately after this
 def train():
     print("doing quantized aware training")
-    # In case of CartPole-v1, maximum length of episode is 500
-    env = gym.make("CartPole-v1")
+
+    # TODO setup the robot_environment, state_size and action_size
+    env = RobotEnvironment()
+
+    # TODO determine a way to get the size of observation
+    # in step() of RobotEnvironment, observation = [pitch_data,], I have no idea how to get it from there
+    # if we can fetch the size directly from RobotEnvironment, then there is no need to hardcode state_size and action_size
+    # maybe you can include some getter functions inside RobotEnvironment to get the data like below:
+    # state_size = env.get_state_size()
+    # action_size = env.get_action_size()
+
     # get size of state and action from environment
-    state_size = env.observation_space.shape[0]
-    action_size = env.action_space.n
+    state_size = 1
+    action_size = 2
 
     print("setting up agent")
     agent = DoubleDQNAgent_quant(state_size, action_size, mode="train")
@@ -237,12 +249,12 @@ def train():
     for e in range(EPISODES):
         done = False
         score = 0
+        
+        # TODO this should work
         state = env.reset()
         state = np.reshape(state, [1, state_size])
 
         while not done:
-            if agent.render:
-                env.render()
 
             # get action for the current state and go one step in environment
             action = agent.get_action(state)
@@ -290,29 +302,36 @@ def train():
             agent.save_quant_model()
 
 def predict():
-    env = gym.make("CartPole-v1")
+    # TODO setup the robot_environment, state_size and action_size
+    env = RobotEnvironment()
+
+    # TODO determine a way to get the size of observation
+    # in step() of RobotEnvironment, observation = [pitch_data,], I have no idea how to get it from there
+    # if we can fetch the size directly from RobotEnvironment, then there is no need to hardcode state_size and action_size
+    # maybe you can include some getter functions inside RobotEnvironment to get the data like below:
+    # state_size = env.get_state_size()
+    # action_size = env.get_action_size()
 
     # get size of state and action from environment
-    state_size = env.observation_space.shape[0]
-    action_size = env.action_space.n
+    state_size = 1
+    action_size = 2
+    
     load_model = True
-    render = True
 
     agent = DoubleDQNAgent_quant(
-        state_size, action_size, render=render, load_model=load_model, mode="eval"
+        state_size, action_size, load_model=load_model, mode="eval"
     )
 
     done = False
     score = 0
 
+    # TODO this should work
     state = env.reset()
     state = np.reshape(state, [1, state_size])
 
     iterations = 0
     while not done:
         timeVal = time.time()
-        if agent.render:
-            env.render()
 
         # get action for the current state and go one step in environment
         action = agent.get_action(state)
