@@ -8,6 +8,8 @@ from keras.layers import Dense
 from keras.models import Sequential
 from keras.optimizers import Adam
 
+import time
+
 EPISODES = 300
 
 # Double DQN Agent for the Cartpole
@@ -214,7 +216,11 @@ def predict():
     state = env.reset()
     state = np.reshape(state, [1, state_size])
 
+    iterations = 0
+
+
     while not done:
+        timeVal = time.time()
         if agent.render:
             env.render()
 
@@ -226,10 +232,16 @@ def predict():
         score += reward
         state = next_state
 
+        iterations += 1
+        timeVal = time.time() - timeVal
+        print("time taken:", timeVal)
+
         if done:
             print(score)
 
+    print("iterations:", iterations)
+
 
 if __name__ == "__main__":
-    train()
+    #train()
     predict()
